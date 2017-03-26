@@ -23,6 +23,30 @@ int clickamount;
 ofstream outputfile;
 ifstream inputfile;
 
+
+string type2str(int type) {
+  string r;
+
+  uchar depth = type & CV_MAT_DEPTH_MASK;
+  uchar chans = 1 + (type >> CV_CN_SHIFT);
+
+  switch ( depth ) {
+    case CV_8U:  r = "8U"; break;
+    case CV_8S:  r = "8S"; break;
+    case CV_16U: r = "16U"; break;
+    case CV_16S: r = "16S"; break;
+    case CV_32S: r = "32S"; break;
+    case CV_32F: r = "32F"; break;
+    case CV_64F: r = "64F"; break;
+    default:     r = "User"; break;
+  }
+
+  r += "C";
+  r += (chans+'0');
+
+  return r;
+}
+
 /*
     Prints 
     
@@ -285,10 +309,15 @@ void regionGrowing(Mat img, short num) {
     OpenCV histogram function
     Retrieved from http://docs.opencv.org/2.4/doc/tutorials/imgproc/histograms/histogram_calculation/histogram_calculation.html    
 */
-void get_histogram(Mat img){
+Mat get_histogram(Mat img){
+
+    string tp = type2str(img.type());
+    char last = *tp.rbegin();
+
+
+
     vector<Mat> bgr_planes;
     split( img, bgr_planes );
-
 
     int histSize = 256;
 
@@ -300,9 +329,10 @@ void get_histogram(Mat img){
     Mat b_hist, g_hist, r_hist;
 
     calcHist( &bgr_planes[0], 1, 0, Mat(), b_hist, 1, &histSize, &histRange, uniform, accumulate );
+if(last != '1'){
     calcHist( &bgr_planes[1], 1, 0, Mat(), g_hist, 1, &histSize, &histRange, uniform, accumulate );
     calcHist( &bgr_planes[2], 1, 0, Mat(), r_hist, 1, &histSize, &histRange, uniform, accumulate );
-
+}
     // Draw the histograms for B G R
     int hist_w = 512; int hist_h = 400;
     int bin_w = cvRound( (double) hist_w/histSize );
@@ -311,33 +341,71 @@ void get_histogram(Mat img){
 
     // Normalize the result to [0, histImage.rows]
     normalize(b_hist, b_hist, 0, histImage.rows, NORM_MINMAX, -1, Mat() );
+ if(last != '1'){
     normalize(g_hist, g_hist, 0, histImage.rows, NORM_MINMAX, -1, Mat() );
     normalize(r_hist, r_hist, 0, histImage.rows, NORM_MINMAX, -1, Mat() );
-
+}
     /// Draw for each channel
     for( int i = 1; i < histSize; i++ ) {
         line( histImage, Point( bin_w*(i-1), hist_h - cvRound(b_hist.at<float>(i-1)) ) ,
                    Point( bin_w*(i), hist_h - cvRound(b_hist.at<float>(i)) ),
                    Scalar( 255, 0, 0), 2, 8, 0  );
+ if(last != '1'){
         line( histImage, Point( bin_w*(i-1), hist_h - cvRound(g_hist.at<float>(i-1)) ) ,
                     Point( bin_w*(i), hist_h - cvRound(g_hist.at<float>(i)) ),
                     Scalar( 0, 255, 0), 2, 8, 0  );
         line( histImage, Point( bin_w*(i-1), hist_h - cvRound(r_hist.at<float>(i-1)) ) ,
                     Point( bin_w*(i), hist_h - cvRound(r_hist.at<float>(i)) ),
                     Scalar( 0, 0, 255), 2, 8, 0  );
+}
     }
-    imshow("OpenCV Histogram", histImage );
+    return histImage;
 }
 
 
 void showMenu(){
     cout << "Mode: " << endl;
+    cout << "s) Convert to N colors" << endl;
     cout << "d) Train the model: HSV Colors" << endl;
     cout << "f) Train the model: Hu Moments" << endl;
     cout << "g) Detect an object" << endl;
     cout << "h) Graph Hu Moments" << endl;
     cout << "c) Color Filter" << endl;
     cout << "v) Remove the model" << endl;
+}
+
+
+/*
+    Color quantization with OpenCV
+    Retrieved from http://answers.opencv.org/question/27808/how-can-you-use-k-means-clustering-to-posterize-an-image-using-c/
+*/
+Mat colorQuantizationN(Mat src, int num){
+
+    Mat samples(src.rows * src.cols, 3, CV_32F);
+    for( int y = 0; y < src.rows; y++ )
+        for( int x = 0; x < src.cols; x++ )
+            for( int z = 0; z < 3; z++)
+                samples.at<float>(y + x*src.rows, z) = src.at<Vec3b>(y,x)[z];
+
+
+    int clusterCount = num;
+    Mat labels;
+    int attempts = 5;
+    Mat centers;
+    kmeans(samples, clusterCount, labels, TermCriteria(CV_TERMCRIT_ITER|CV_TERMCRIT_EPS, 10000, 0.0001), attempts, KMEANS_PP_CENTERS, centers );
+
+
+    Mat new_image( src.size(), src.type() );
+    for( int y = 0; y < src.rows; y++ )
+        for( int x = 0; x < src.cols; x++ ) { 
+            int cluster_idx = labels.at<int>(y + x*src.rows,0);
+            new_image.at<Vec3b>(y,x)[0] = centers.at<float>(cluster_idx, 0);
+            new_image.at<Vec3b>(y,x)[1] = centers.at<float>(cluster_idx, 1);
+            new_image.at<Vec3b>(y,x)[2] = centers.at<float>(cluster_idx, 2);
+        }
+    imshow( "clustered image", new_image );
+
+    return new_image;
 }
 
 
@@ -353,6 +421,9 @@ void trainHSVColors(Mat img){
     );
     filter2D(img, img, -1 , my_kernel, Point( -1, -1 ), 0, BORDER_DEFAULT );
     imshow("Gaussian filter", img);
+    
+    // Tried with bigger kernel but didn't help a lot
+    //GaussianBlur( img, img, Size( 9,9 ), 0, 0 );
 
     // BGR to HSV
     cvtColor(img, imgHSV, COLOR_BGR2HSV);
@@ -433,11 +504,14 @@ void colorFilter(Mat img){
 
 }
 
-VideoCapture cap(0);
 
-int main()
+
+
+VideoCapture cap(1);
+
+int main(int argc, char** argv)
 {
-	Mat img, imgBIN;
+	Mat img, imgBIN, imgQuan, hist1, hist2, hist3;
     short num_seed;
     
     // Opening training files. 
@@ -454,10 +528,13 @@ int main()
 
         cap >> img;
 
-        get_histogram(img);
+        hist1 = get_histogram(img);
+        imshow("Img Histogram", hist1);
+
 
         imshow("Cam", img);
         setMouseCallback("Cam", mouseCoordinatesCallback);
+
 
         if(!freeze){
             imgClick = img;
@@ -473,6 +550,12 @@ int main()
 
         char key = waitKey(5);
         switch (key) {
+            case 's': // Convert the image into a Num of Colors
+                imgQuan = colorQuantizationN(img, atoi(argv[1]));
+                cout << "ImgQuan type " + type2str(imgQuan.type()) + "\n";
+                hist2 = get_histogram(imgQuan);
+                imshow("ImgQuan Histogram", hist2 );
+                break;
             case 'd': // Train the model: HSV Colors
                 trainHSVColors(img);
                 break;
@@ -480,10 +563,16 @@ int main()
 
                 break;
             case 'g': // Detect and object
-                cout<<"How many regions to find?"<<endl;
-                cin >> num_seed;    
-                cout << "Region Growing Algorithm about to start \n" << endl; 
-                regionGrowing(img, num_seed);     
+                //cout<<"How many regions to find?"<<endl;
+                //cin >> num_seed;    
+                num_seed = 2;
+                cout << "Region Growing Algorithm about to start \n" << endl;
+                cvtColor( imgQuan, imgQuan, CV_BGR2GRAY );
+                hist3 = get_histogram(imgQuan);
+                imshow("Gray Histogram", hist3 );
+                //threshold(imgQuan, imgQuan, 25,255,THRESH_BINARY_INV);
+                imshow("Binarized" , imgQuan);
+                //regionGrowing(imgQuan, num_seed);     
                 break;
             case 'h': // Graph Hu Moments
 
