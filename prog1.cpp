@@ -507,7 +507,7 @@ void colorFilter(Mat img){
 
 
 
-VideoCapture cap(1);
+VideoCapture cap(0);
 
 int main(int argc, char** argv)
 {
